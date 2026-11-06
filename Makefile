@@ -5,6 +5,6 @@ app:
 test:
 	swift run HotspotCoreChecks
 check: app
-	"dist/Sequoia Hotspot.app/Contents/MacOS/SequoiaHotspot" --check-interface
+	"/Applications/Sequoia Hotspot.app/Contents/MacOS/SequoiaHotspot" --check-interface
 clean:
-	rm -rf .build dist
+	rm -rf .build
