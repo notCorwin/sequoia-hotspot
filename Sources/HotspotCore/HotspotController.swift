@@ -20,6 +20,7 @@ public struct Credentials: Sendable {
 }
 
 @MainActor public protocol HotspotJoining: AnyObject {
+    func enableWiFi() throws
     func join(_ credentials: Credentials) async throws
     func cancel()
 }
@@ -111,6 +112,7 @@ public struct HotspotFailure: LocalizedError, Sendable {
         guard let available else { publish("正在读取网络状态…"); return }
         guard !available else { publish("网络可用"); return }
         do {
+            try joiner.enableWiFi()
             browsing = true
             try discovery.start()
             if !busy { publish("网络已断开，等待同账户设备…") }

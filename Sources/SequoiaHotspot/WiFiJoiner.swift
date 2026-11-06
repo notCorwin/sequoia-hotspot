@@ -42,14 +42,29 @@ import HotspotCore
         for waiter in waiters { waiter.resume() }
     }
 
+    func enableWiFi() throws {
+        _ = try poweredInterface()
+    }
+
+    private func poweredInterface() throws -> CWInterface {
+        guard let interface = CWWiFiClient.shared().interface(), interface.interfaceName != nil else {
+            throw HotspotFailure("找不到 Wi‑Fi 接口；请确认此 Mac 支持 Wi‑Fi。")
+        }
+        if !interface.powerOn() {
+            do { try interface.setPower(true) }
+            catch {
+                throw HotspotFailure("无法自动开启 Wi‑Fi；请在系统设置中手动开启 Wi‑Fi，然后点击重试。")
+            }
+        }
+        return interface
+    }
+
     func join(_ credentials: Credentials) async throws {
         await waitForPreviousExit()
         try Task.checkCancellation()
-        guard let interface = CWWiFiClient.shared().interface(), let name = interface.interfaceName else {
+        let interface = try poweredInterface()
+        guard let name = interface.interfaceName else {
             throw HotspotFailure("找不到 Wi‑Fi 接口；请确认此 Mac 支持 Wi‑Fi。")
-        }
-        guard interface.powerOn() else {
-            throw HotspotFailure("Wi‑Fi 已关闭；请开启 Wi‑Fi，然后点击重试。")
         }
         let id = UUID()
         try await withTaskCancellationHandler {

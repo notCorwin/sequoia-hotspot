@@ -21,10 +21,16 @@ import HotspotCore
 }
 
 @MainActor private final class Joiner: HotspotJoining {
+    var powerRequests = 0
+    var powerFailure: HotspotFailure?
     var joins = 0
     var failure: HotspotFailure?
     var hang = false
     var pending: [CheckedContinuation<Void, any Error>] = []
+    func enableWiFi() throws {
+        powerRequests += 1
+        if let powerFailure { throw powerFailure }
+    }
     func join(_ credentials: Credentials) async throws {
         joins += 1
         if let failure { throw failure }
@@ -48,12 +54,15 @@ import HotspotCore
         let controller = HotspotController(discovery: discovery, joiner: joiner)
         controller.setEnabled(true)
         expectFalse(controller.canRetry)
+        expectEqual(joiner.powerRequests, 0)
         expectEqual(discovery.starts, 0)
         controller.networkAvailable(true)
         expectEqual(discovery.starts, 0)
+        expectEqual(joiner.powerRequests, 0)
         controller.networkAvailable(false)
         controller.networkAvailable(false)
         expectEqual(discovery.starts, 1)
+        expectEqual(joiner.powerRequests, 1)
         discovery.emit(["phone"])
         try await waitFor { discovery.requested.count == 1 }
         discovery.finish()
@@ -218,6 +227,38 @@ import HotspotCore
         expect(controller.browsing)
         controller.setEnabled(false)
     }
+
+    @MainActor func testWiFiPowerFailureStopsDiscoveryAndRetryEnablesWiFi() {
+        let discovery = Discovery(), joiner = Joiner()
+        let controller = HotspotController(discovery: discovery, joiner: joiner)
+        joiner.powerFailure = HotspotFailure("无法自动开启 Wi‑Fi")
+        controller.setEnabled(true)
+        controller.networkAvailable(false)
+        expectEqual(joiner.powerRequests, 1)
+        expectEqual(discovery.starts, 0)
+        expectFalse(controller.browsing)
+        expect(controller.canRetry)
+        expectEqual(controller.status, "无法自动开启 Wi‑Fi")
+        joiner.powerFailure = nil
+        controller.retry()
+        expectEqual(joiner.powerRequests, 2)
+        expectEqual(discovery.starts, 1)
+        expect(controller.browsing)
+        controller.setEnabled(false)
+    }
+
+    @MainActor func testOfflineWhilePausedDoesNotEnableWiFiUntilResumed() {
+        let discovery = Discovery(), joiner = Joiner()
+        let controller = HotspotController(discovery: discovery, joiner: joiner)
+        controller.networkAvailable(false)
+        expectEqual(joiner.powerRequests, 0)
+        expectEqual(discovery.starts, 0)
+        controller.setEnabled(true)
+        expectEqual(joiner.powerRequests, 1)
+        expectEqual(discovery.starts, 1)
+        controller.setEnabled(false)
+        expectEqual(joiner.powerRequests, 1)
+    }
 }
 
 private func expect(_ condition: Bool, file: StaticString = #filePath, line: UInt = #line) {
@@ -243,6 +284,8 @@ private func expectEqual<T: Equatable>(_ actual: T, _ expected: T, file: StaticS
         try await tests.testJoiningTimeoutIgnoresLateCommandCompletion()
         try await tests.testRecoveryWhileJoiningIgnoresLateCommandCompletion()
         tests.testUnsupportedInterfaceCanBeRetriedWithoutPretendingToBrowse()
-        print("10 hotspot behavior checks passed.")
+        tests.testWiFiPowerFailureStopsDiscoveryAndRetryEnablesWiFi()
+        tests.testOfflineWhilePausedDoesNotEnableWiFiUntilResumed()
+        print("12 hotspot behavior checks passed.")
     }
 }
