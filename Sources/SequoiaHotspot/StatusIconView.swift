@@ -3,7 +3,7 @@ import Symbols
 
 @MainActor final class StatusIconView: NSImageView {
     static let iconSize = NSSize(width: 22, height: 18)
-    static let horizontalInset: CGFloat = 5
+    static let horizontalInset: CGFloat = 3
 
     private var isOffline: Bool?
     private var breathing = false
