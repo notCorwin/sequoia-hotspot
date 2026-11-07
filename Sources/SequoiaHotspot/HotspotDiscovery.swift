@@ -7,6 +7,7 @@ import ObjectiveC
 private struct RuntimeTransfer: @unchecked Sendable {
     let first: AnyObject?
     let second: AnyObject?
+    var error: NSError? = nil
 }
 
 @MainActor final class RemoteHotspotDiscovery: NSObject, HotspotDiscovery {
@@ -81,11 +82,17 @@ private struct RuntimeTransfer: @unchecked Sendable {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
                 requests[requestID] = continuation
-                let reply: @convention(block) (AnyObject?, AnyObject?) -> Void = { [weak self] first, second in
-                    let transfer = RuntimeTransfer(first: first, second: second)
+                let reply: @convention(block) (AnyObject?, AnyObject?, NSError?) -> Void = { [weak self] first, second, error in
+                    let transfer = RuntimeTransfer(first: first, second: second, error: error)
                     Task { @MainActor [weak self] in
                         guard let continuation = self?.requests.removeValue(forKey: requestID) else { return }
-                        if let ssid = transfer.first as? String, !ssid.isEmpty,
+                        if let error = transfer.error {
+                            let advice = error.domain == NSPOSIXErrorDomain && error.code == Int(ENOTSUP)
+                                ? "系统暂不支持此次热点请求；请检查 iPhone 的个人热点和蜂窝网络。"
+                                : "请检查设备在附近、同一 Apple 账户、蓝牙和蜂窝网络。"
+                            // Avoid localizedDescription/userInfo: either can contain credentials.
+                            continuation.resume(throwing: HotspotFailure("唤起热点失败（\(error.domain)，错误码 \(error.code)）；\(advice)"))
+                        } else if let ssid = transfer.first as? String, !ssid.isEmpty,
                            let password = transfer.second as? String, !password.isEmpty {
                             continuation.resume(returning: Credentials(ssid: ssid, password: password))
                         } else {
@@ -93,7 +100,7 @@ private struct RuntimeTransfer: @unchecked Sendable {
                         }
                     }
                 }
-                typealias Activate = @convention(c) (AnyObject, Selector, AnyObject, @convention(block) (AnyObject?, AnyObject?) -> Void) -> Void
+                typealias Activate = @convention(c) (AnyObject, Selector, AnyObject, @convention(block) (AnyObject?, AnyObject?, NSError?) -> Void) -> Void
                 let selector = NSSelectorFromString("enableHotspotForDevice:withCompletionHandler:")
                 let activate = unsafeBitCast(session.method(for: selector), to: Activate.self)
                 activate(session, selector, payload, reply)

@@ -8,7 +8,12 @@ import HotspotCore
     var requested: [String] = []
     var pending: [CheckedContinuation<Credentials, any Error>] = []
     var startError: HotspotFailure?
-    func start() throws { starts += 1; if let startError { throw startError } }
+    var automaticDevices: [String]?
+    func start() throws {
+        starts += 1
+        if let startError { throw startError }
+        if let automaticDevices { emit(automaticDevices) }
+    }
     func stop() {}
     func activate(_ device: HotspotDevice) async throws -> Credentials {
         requested.append(device.id)
@@ -107,24 +112,91 @@ import HotspotCore
         expectEqual(controller.status, "网络可用")
     }
 
-    @MainActor func testRepeatedUpdatesDoNotRetryButReappearanceDoes() async throws {
+    @MainActor func testAllErrorsKeepRetryingWithFreshDiscovery() async throws {
         let discovery = Discovery(), joiner = Joiner()
-        let controller = HotspotController(discovery: discovery, joiner: joiner)
+        discovery.automaticDevices = ["phone"]
+        let controller = HotspotController(discovery: discovery, joiner: joiner, retryInterval: .milliseconds(20))
         controller.setEnabled(true)
         controller.networkAvailable(false)
-        discovery.emit(["phone"])
-        try await waitFor { discovery.requested.count == 1 }
-        discovery.emit(["phone"])
-        discovery.finish(.failure(HotspotFailure("activation failed")))
-        try await waitFor { !controller.busy }
-        discovery.emit(["phone"])
-        expectFalse(controller.busy)
-        expectEqual(discovery.requested.count, 1)
-        discovery.emit([])
-        discovery.emit(["phone"])
-        try await waitFor { discovery.requested.count == 2 }
+        // A persistent error must neither exhaust attempts nor require disappearance.
+        for attempt in 1...4 {
+            try await waitFor { discovery.requested.count == attempt }
+            discovery.finish(.failure(NSError(domain: NSPOSIXErrorDomain, code: 45)))
+        }
+        try await waitFor { discovery.requested.count == 5 }
+        expectEqual(discovery.starts, 5)
         controller.setEnabled(false)
         discovery.finish()
+    }
+
+    @MainActor func testDiscoveryAndPowerErrorsRetryUntilRecovery() async throws {
+        let discovery = Discovery(), joiner = Joiner()
+        let controller = HotspotController(discovery: discovery, joiner: joiner, retryInterval: .milliseconds(20))
+        joiner.powerFailure = HotspotFailure("power failed")
+        controller.setEnabled(true)
+        controller.networkAvailable(false)
+        try await waitFor { joiner.powerRequests >= 3 }
+        expectEqual(discovery.starts, 0)
+        discovery.startError = HotspotFailure("unsupported")
+        joiner.powerFailure = nil
+        try await waitFor { discovery.starts >= 3 }
+        expectFalse(controller.browsing)
+        discovery.startError = nil
+        discovery.automaticDevices = ["phone"]
+        try await waitFor { discovery.requested.count == 1 }
+        discovery.finish()
+        try await waitFor { joiner.joins == 1 }
+        controller.networkAvailable(true)
+    }
+
+    @MainActor func testEveryConnectionFailureStageRetries() async throws {
+        // Activation deadline, join failure, join deadline, network confirmation deadline.
+        for stage in 0..<4 {
+            let discovery = Discovery(), joiner = Joiner()
+            discovery.automaticDevices = ["phone"]
+            if stage == 1 { joiner.failure = HotspotFailure("join failed") }
+            if stage == 2 { joiner.hang = true }
+            let controller = HotspotController(discovery: discovery, joiner: joiner,
+                activationTimeout: stage == 0 ? .milliseconds(20) : .seconds(1),
+                joiningTimeout: .milliseconds(20), confirmationTimeout: .milliseconds(20),
+                retryInterval: .milliseconds(20))
+            controller.setEnabled(true)
+            controller.networkAvailable(false)
+            try await waitFor { discovery.requested.count == 1 }
+            if stage != 0 { discovery.finish() }
+            try await waitFor { discovery.requested.count == 2 }
+            expectEqual(discovery.starts, 2)
+            controller.setEnabled(false)
+            while !discovery.pending.isEmpty { discovery.finish() }
+            while !joiner.pending.isEmpty { joiner.finish() }
+        }
+    }
+
+    @MainActor func testRetryWaitCannotBeBypassedAndStopsForPauseSleepOrRecovery() async throws {
+        for transition in 0..<3 {
+            let discovery = Discovery(), joiner = Joiner()
+            let controller = HotspotController(discovery: discovery, joiner: joiner, retryInterval: .milliseconds(40))
+            controller.setEnabled(true)
+            controller.networkAvailable(false)
+            discovery.emit(["phone"])
+            try await waitFor { discovery.requested.count == 1 }
+            discovery.finish(.failure(HotspotFailure("failed")))
+            try await waitFor { !controller.busy }
+            discovery.emit([])
+            discovery.emit(["phone"])
+            expectFalse(controller.busy)
+            switch transition {
+            case 0: controller.setEnabled(false)
+            case 1: controller.suspend()
+            default: controller.networkAvailable(true)
+            }
+            let status = controller.status
+            try await Task.sleep(for: .milliseconds(70))
+            expectEqual(discovery.starts, 1)
+            expectEqual(discovery.requested.count, 1)
+            expectEqual(controller.status, status)
+            controller.setEnabled(false)
+        }
     }
 
     @MainActor func testFailureTriesOtherDeviceAndManualRetryStartsNewAttempt() async throws {
@@ -139,8 +211,10 @@ import HotspotCore
         try await waitFor { discovery.requested == ["a", "b"] }
         discovery.finish()
         try await waitFor { !controller.busy }
-        expectEqual(controller.status, "join failed")
+        expect(controller.status.contains("join failed"))
         controller.retry()
+        expectEqual(discovery.starts, 2)
+        discovery.emit(["a", "b"])
         try await waitFor { discovery.requested == ["a", "b", "a"] }
         controller.setEnabled(false)
         discovery.finish()
@@ -238,7 +312,7 @@ import HotspotCore
         controller.setEnabled(true)
         controller.networkAvailable(false)
         expectFalse(controller.browsing)
-        expectEqual(controller.status, "unsupported")
+        expect(controller.status.contains("unsupported"))
         discovery.startError = nil
         controller.retry()
         expect(controller.browsing)
@@ -255,7 +329,7 @@ import HotspotCore
         expectEqual(discovery.starts, 0)
         expectFalse(controller.browsing)
         expect(controller.canRetry)
-        expectEqual(controller.status, "无法自动开启 Wi‑Fi")
+        expect(controller.status.contains("无法自动开启 Wi‑Fi"))
         joiner.powerFailure = nil
         controller.retry()
         expectEqual(joiner.powerRequests, 2)
@@ -294,7 +368,10 @@ private func expectEqual<T: Equatable>(_ actual: T, _ expected: T, file: StaticS
         tests.testOfflineIndicatorTracksNetworkWhilePausedAndResetsForSleep()
         try await tests.testOfflineStartupAndRecoveryOnlyBrowseWhenNeeded()
         try await tests.testRecoveryDiscardsLateActivationCredentials()
-        try await tests.testRepeatedUpdatesDoNotRetryButReappearanceDoes()
+        try await tests.testAllErrorsKeepRetryingWithFreshDiscovery()
+        try await tests.testDiscoveryAndPowerErrorsRetryUntilRecovery()
+        try await tests.testEveryConnectionFailureStageRetries()
+        try await tests.testRetryWaitCannotBeBypassedAndStopsForPauseSleepOrRecovery()
         try await tests.testFailureTriesOtherDeviceAndManualRetryStartsNewAttempt()
         try await tests.testPauseAndSleepSuppressCallbacksAndWakeRechecksNetwork()
         try await tests.testActivationTimeoutReleasesBusyStateAndIgnoresLateReply()
@@ -304,6 +381,6 @@ private func expectEqual<T: Equatable>(_ actual: T, _ expected: T, file: StaticS
         tests.testUnsupportedInterfaceCanBeRetriedWithoutPretendingToBrowse()
         tests.testWiFiPowerFailureStopsDiscoveryAndRetryEnablesWiFi()
         tests.testOfflineWhilePausedDoesNotEnableWiFiUntilResumed()
-        print("13 hotspot behavior checks passed.")
+        print("16 hotspot behavior checks passed.")
     }
 }

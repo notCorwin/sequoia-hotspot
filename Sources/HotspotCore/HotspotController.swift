@@ -46,14 +46,18 @@ public struct HotspotFailure: LocalizedError, Sendable {
     private var attempted: Set<String> = []
     private var operation: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
     private var generation: UInt = 0
+    private let retryInterval: Duration
     private let activationTimeout: Duration
     private let joiningTimeout: Duration
     private let confirmationTimeout: Duration
 
     public init(discovery: any HotspotDiscovery, joiner: any HotspotJoining,
                 activationTimeout: Duration = .seconds(30), joiningTimeout: Duration = .seconds(45),
-                confirmationTimeout: Duration = .seconds(20)) {
+                confirmationTimeout: Duration = .seconds(20), retryInterval: Duration = .seconds(5)) {
+        precondition(retryInterval > .zero, "Retry interval must be positive")
+        self.retryInterval = retryInterval
         self.discovery = discovery
         self.joiner = joiner
         self.activationTimeout = activationTimeout
@@ -83,10 +87,8 @@ public struct HotspotFailure: LocalizedError, Sendable {
 
     public func retry() {
         guard canRetry else { return }
-        guard browsing else { reconcile(); return }
-        attempted.removeAll()
-        publish("正在等待热点设备…")
-        tryNext()
+        reset()
+        reconcile()
     }
 
     private func publish(_ message: String) {
@@ -96,6 +98,8 @@ public struct HotspotFailure: LocalizedError, Sendable {
 
     private func reset() {
         generation &+= 1
+        retryTask?.cancel()
+        retryTask = nil
         operation?.cancel()
         operation = nil
         deadline?.cancel()
@@ -121,13 +125,26 @@ public struct HotspotFailure: LocalizedError, Sendable {
             browsing = false
             discovery.stop()
             publish(error.localizedDescription)
+            scheduleRetry()
+        }
+    }
+
+    private func scheduleRetry() {
+        guard enabled, available == false, !busy, retryTask == nil else { return }
+        let token = generation
+        publish("\(status)（将自动重试）")
+        retryTask = Task { [weak self, retryInterval] in
+            do { try await Task.sleep(for: retryInterval) } catch { return }
+            guard let self, generation == token, enabled, available == false else { return }
+            // Refresh the session and its device objects for every new round.
+            reset()
+            reconcile()
         }
     }
 
     private func received(_ devices: [HotspotDevice]) {
         guard browsing else { return }
         self.devices = devices
-        attempted.formIntersection(Set(devices.map(\.id)))
         tryNext()
     }
 
@@ -151,11 +168,12 @@ public struct HotspotFailure: LocalizedError, Sendable {
         busy = false
         publish(message)
         tryNext()
+        if !busy { scheduleRetry() }
     }
 
     private func tryNext() {
-        guard browsing, !busy,
-              let device = devices.sorted(by: { $0.id < $1.id }).first(where: { !attempted.contains($0.id) }) else { return }
+        guard browsing, !busy, retryTask == nil else { return }
+        guard let device = devices.sorted(by: { $0.id < $1.id }).first(where: { !attempted.contains($0.id) }) else { return }
         attempted.insert(device.id)
         busy = true
         generation &+= 1
