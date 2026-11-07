@@ -10,6 +10,15 @@ import Symbols
         .applying(.preferringMonochrome())
     private static let connectedImage = symbol("personalhotspot")
     private static let disconnectedImage = symbol("personalhotspot.slash")
+    // labelColor includes translucency. Keep its appearance-dependent hue, but
+    // draw solid menu-bar glyphs instead of blending them into the background.
+    private static let normalTint = NSColor(name: nil) { appearance in
+        var color = NSColor.black
+        appearance.performAsCurrentDrawingAppearance {
+            color = NSColor.labelColor.withAlphaComponent(1)
+        }
+        return color
+    }
 
     private static func symbol(_ name: String) -> NSImage? {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
@@ -49,7 +58,7 @@ import Symbols
     func setEmphasized(_ emphasized: Bool) {
         cell?.backgroundStyle = emphasized ? .emphasized : .normal
         symbolConfiguration = Self.symbolStyle
-        contentTintColor = emphasized ? .selectedMenuItemTextColor : .labelColor
+        contentTintColor = emphasized ? .selectedMenuItemTextColor : Self.normalTint
     }
 
     // Both symbols share a canvas center, regardless of their optical padding.

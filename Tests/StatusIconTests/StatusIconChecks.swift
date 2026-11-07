@@ -35,10 +35,42 @@ import AppKit
                     online = mask
                 }
             }
+            checkTint(icon)
             icon.removeFromSuperview()
             button.removeFromSuperview()
         }
-        print("Status icon transitions keep the chain aligned at both menu-bar heights.")
+        print("Status icons stay aligned and render opaque in light and dark appearances.")
+    }
+
+    @MainActor private static func checkTint(_ icon: StatusIconView) {
+        // Reuse the same view to catch colors frozen to the initial appearance.
+        for appearance in [NSAppearance.Name.aqua, .darkAqua, .aqua] {
+            icon.window!.appearance = NSAppearance(named: appearance)
+            for offline in [false, true] {
+                icon.update(isOffline: offline, reduceMotion: true)
+                for emphasized in [false, true, false] {
+                    icon.setEmphasized(emphasized)
+                    var expected = NSColor.black
+                    icon.effectiveAppearance.performAsCurrentDrawingAppearance {
+                        expected = (emphasized ? NSColor.selectedMenuItemTextColor
+                                    : NSColor.labelColor.withAlphaComponent(1)).usingColorSpace(.sRGB)!
+                    }
+                    let bitmap = icon.bitmapImageRepForCachingDisplay(in: icon.bounds)!
+                    icon.cacheDisplay(in: icon.bounds, to: bitmap)
+                    var solidPixels = 0
+                    for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                        let color = bitmap.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+                        guard color.alphaComponent > 0.99 else { continue }
+                        solidPixels += 1
+                        expect(abs(color.redComponent - expected.redComponent) < 0.01 &&
+                               abs(color.greenComponent - expected.greenComponent) < 0.01 &&
+                               abs(color.blueComponent - expected.blueComponent) < 0.01,
+                               "Status icon tint does not match its appearance or menu highlight")
+                    } }
+                    expect(solidPixels > 0, "Status icon is translucent in \(appearance.rawValue)")
+                }
+            }
+        }
     }
 
     private struct Mask: Equatable {
