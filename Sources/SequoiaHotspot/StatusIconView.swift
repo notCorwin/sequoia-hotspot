@@ -6,7 +6,7 @@ import Symbols
     static let horizontalInset: CGFloat = 2
 
     private var isOffline: Bool?
-    private var breathing = false
+    private var pulsing = false
 
     func setEmphasized(_ emphasized: Bool) {
         cell?.backgroundStyle = emphasized ? .emphasized : .normal
@@ -28,11 +28,11 @@ import Symbols
             setAccessibilityElement(false)
         }
 
-        let shouldBreathe = isOffline && !reduceMotion
-        guard breathing != shouldBreathe else { return }
-        breathing = shouldBreathe
-        if shouldBreathe {
-            addSymbolEffect(.breathe.pulse.byLayer, options: .repeat(.continuous).speed(4))
+        let shouldPulse = isOffline && !reduceMotion
+        guard pulsing != shouldPulse else { return }
+        pulsing = shouldPulse
+        if shouldPulse {
+            addSymbolEffect(.pulse.byLayer, options: .repeat(.continuous).speed(4))
         } else {
             removeAllSymbolEffects(animated: false)
         }
