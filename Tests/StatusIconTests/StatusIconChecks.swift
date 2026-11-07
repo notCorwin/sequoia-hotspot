@@ -17,18 +17,20 @@ import AppKit
             icon.install(in: button)
 
             var online: Mask?
-            for offline in [false, true, false, true] {
-                // Match the application transition, including the native image swap.
-                icon.update(isOffline: offline, reduceMotion: true)
-                icon.isHidden = !offline
-                button.image = offline ? nil : StatusIconView.connectedImage
+            for offline in [false, true, false, true, false] {
+                // Exercise the same view and update method used by the application.
+                icon.update(isOffline: offline, reduceMotion: false)
+                expect(button.image == nil, "A second renderer replaced the status icon")
+                expect(icon.frame.midY == button.bounds.midY, "The image canvas moved vertically")
                 let mask = snapshot(button)
                 if offline {
                     checkAlignment(online!, mask)
                     let frame = icon.frame
-                    icon.update(isOffline: true, reduceMotion: false)
-                    expect(icon.frame == frame, "Starting the offline pulse moved the icon")
                     icon.update(isOffline: true, reduceMotion: true)
+                    expect(icon.frame == frame, "Reduced Motion moved the icon")
+                    icon.update(isOffline: true, reduceMotion: false)
+                } else if let online {
+                    expect(mask == online, "Returning from an active pulse changed the online icon")
                 } else {
                     online = mask
                 }
@@ -39,7 +41,7 @@ import AppKit
         print("Status icon transitions keep the chain aligned at both menu-bar heights.")
     }
 
-    private struct Mask {
+    private struct Mask: Equatable {
         let width: Int
         let height: Int
         let pixels: [Bool]

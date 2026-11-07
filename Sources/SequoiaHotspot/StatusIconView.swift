@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import Symbols
 
 @MainActor final class StatusIconView: NSImageView {
@@ -7,23 +8,25 @@ import Symbols
 
     private static let symbolStyle = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         .applying(.preferringMonochrome())
-    static let connectedImage: NSImage? = {
-        let image = NSImage(systemSymbolName: "personalhotspot", accessibilityDescription: nil)?
+    private static let connectedImage = symbol("personalhotspot")
+    private static let disconnectedImage = symbol("personalhotspot.slash")
+
+    private static func symbol(_ name: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(symbolStyle)
         image?.isTemplate = true
         return image
-    }()
+    }
 
+    private var offline: Bool?
     private var pulsing = false
-    private var alignmentCell: NSButtonCell?
 
     func install(in button: NSStatusBarButton) {
-        alignmentCell = button.cell?.copy() as? NSButtonCell
-        alignmentCell?.image = Self.connectedImage
-        alignmentCell?.imagePosition = .imageOnly
-        alignmentCell?.controlView = button
+        button.image = nil
         autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
         button.addSubview(self)
+        setEmphasized(false)
+        setAccessibilityElement(false)
         alignWithButton()
     }
 
@@ -32,9 +35,15 @@ import Symbols
     }
 
     private func alignWithButton() {
-        guard let button = superview as? NSStatusBarButton, let alignmentCell else { return }
-        // Keep native image geometry even while the button's own image is hidden.
-        frame = frame(forAlignmentRect: alignmentCell.imageRect(forBounds: button.bounds))
+        guard let button = superview, let reference = Self.connectedImage else { return }
+        let size = reference.alignmentRect.size
+        let alignment = NSRect(x: button.bounds.midX - size.width / 2,
+                               y: button.bounds.midY - size.height / 2,
+                               width: size.width, height: size.height)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = frame(forAlignmentRect: alignment)
+        CATransaction.commit()
     }
 
     func setEmphasized(_ emphasized: Bool) {
@@ -43,8 +52,7 @@ import Symbols
         contentTintColor = emphasized ? .selectedMenuItemTextColor : .labelColor
     }
 
-    // The slash has asymmetric optical insets. Center its canvas like the
-    // connected symbol so the shared chain does not jump between states.
+    // Both symbols share a canvas center, regardless of their optical padding.
     override var alignmentRectInsets: NSEdgeInsets {
         var insets = super.alignmentRectInsets
         let vertical = (insets.top + insets.bottom) / 2
@@ -57,13 +65,15 @@ import Symbols
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func update(isOffline: Bool, reduceMotion: Bool) {
-        if image == nil {
-            let image = NSImage(systemSymbolName: "personalhotspot.slash", accessibilityDescription: nil)?
-                .withSymbolConfiguration(Self.symbolStyle)
-            image?.isTemplate = true
-            self.image = image
-            if symbolConfiguration == nil { setEmphasized(false) }
-            setAccessibilityElement(false)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+
+        if offline != isOffline {
+            removeAllSymbolEffects(animated: false)
+            pulsing = false
+            image = isOffline ? Self.disconnectedImage : Self.connectedImage
+            offline = isOffline
             alignWithButton()
         }
 
