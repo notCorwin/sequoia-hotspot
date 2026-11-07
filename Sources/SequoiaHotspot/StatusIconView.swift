@@ -2,7 +2,7 @@ import AppKit
 import Symbols
 
 @MainActor final class StatusIconView: NSImageView {
-    static let iconSize = NSSize(width: 22, height: 18)
+    static let iconWidth: CGFloat = 22
     static let horizontalInset: CGFloat = 2
 
     private static let symbolStyle = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
@@ -14,8 +14,28 @@ import Symbols
         return image
     }()
 
-    private var isOffline: Bool?
     private var pulsing = false
+    private var alignmentCell: NSButtonCell?
+
+    func install(in button: NSStatusBarButton) {
+        alignmentCell = button.cell?.copy() as? NSButtonCell
+        alignmentCell?.image = Self.connectedImage
+        alignmentCell?.imagePosition = .imageOnly
+        alignmentCell?.controlView = button
+        autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        button.addSubview(self)
+        alignWithButton()
+    }
+
+    override func resize(withOldSuperviewSize oldSize: NSSize) {
+        alignWithButton()
+    }
+
+    private func alignWithButton() {
+        guard let button = superview as? NSStatusBarButton, let alignmentCell else { return }
+        // Keep native image geometry even while the button's own image is hidden.
+        frame = frame(forAlignmentRect: alignmentCell.imageRect(forBounds: button.bounds))
+    }
 
     func setEmphasized(_ emphasized: Bool) {
         cell?.backgroundStyle = emphasized ? .emphasized : .normal
@@ -27,15 +47,14 @@ import Symbols
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func update(isOffline: Bool, reduceMotion: Bool) {
-        if self.isOffline != isOffline {
-            self.isOffline = isOffline
-            let image = isOffline
-                ? NSImage(systemSymbolName: "personalhotspot.slash", accessibilityDescription: nil)
-                : nil
+        if image == nil {
+            let image = NSImage(systemSymbolName: "personalhotspot.slash", accessibilityDescription: nil)?
+                .withSymbolConfiguration(Self.symbolStyle)
             image?.isTemplate = true
             self.image = image
             if symbolConfiguration == nil { setEmphasized(false) }
             setAccessibilityElement(false)
+            alignWithButton()
         }
 
         let shouldPulse = isOffline && !reduceMotion

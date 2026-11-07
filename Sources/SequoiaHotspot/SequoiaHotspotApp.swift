@@ -21,17 +21,10 @@ import ServiceManagement
         statusItem.autosaveName = "SequoiaHotspot.StatusItem"
         statusItem.button?.window?.title = "SequoiaHotspot.StatusItem"
         if let button = statusItem.button {
-            statusIcon.translatesAutoresizingMaskIntoConstraints = false
-            button.addSubview(statusIcon)
-            NSLayoutConstraint.activate([
-                statusIcon.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-                statusIcon.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-                statusIcon.widthAnchor.constraint(equalToConstant: StatusIconView.iconSize.width),
-                statusIcon.heightAnchor.constraint(equalToConstant: StatusIconView.iconSize.height),
-            ])
+            statusIcon.install(in: button)
             // A custom image subview does not contribute to the button cell's
             // intrinsic width. Size the status item to its content and insets.
-            statusItem.length = StatusIconView.iconSize.width + 2 * StatusIconView.horizontalInset
+            statusItem.length = StatusIconView.iconWidth + 2 * StatusIconView.horizontalInset
         }
         menu.autoenablesItems = false
         menu.delegate = self
