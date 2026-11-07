@@ -43,6 +43,16 @@ import Symbols
         contentTintColor = emphasized ? .selectedMenuItemTextColor : .labelColor
     }
 
+    // The slash has asymmetric optical insets. Center its canvas like the
+    // connected symbol so the shared chain does not jump between states.
+    override var alignmentRectInsets: NSEdgeInsets {
+        var insets = super.alignmentRectInsets
+        let vertical = (insets.top + insets.bottom) / 2
+        insets.top = vertical
+        insets.bottom = vertical
+        return insets
+    }
+
     // Keep the status button responsible for clicks and menu tracking.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
