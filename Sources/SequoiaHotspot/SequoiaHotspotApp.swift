@@ -17,7 +17,7 @@ import ServiceManagement
     private var updatingLogin = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.autosaveName = "SequoiaHotspot.StatusItem"
         statusItem.button?.window?.title = "SequoiaHotspot.StatusItem"
         if let button = statusItem.button {
@@ -26,9 +26,12 @@ import ServiceManagement
             NSLayoutConstraint.activate([
                 statusIcon.centerXAnchor.constraint(equalTo: button.centerXAnchor),
                 statusIcon.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-                statusIcon.widthAnchor.constraint(equalToConstant: 18),
-                statusIcon.heightAnchor.constraint(equalToConstant: 18),
+                statusIcon.widthAnchor.constraint(equalToConstant: StatusIconView.iconSize.width),
+                statusIcon.heightAnchor.constraint(equalToConstant: StatusIconView.iconSize.height),
             ])
+            // A custom image subview does not contribute to the button cell's
+            // intrinsic width. Size the status item to its content and insets.
+            statusItem.length = StatusIconView.iconSize.width + 2 * StatusIconView.horizontalInset
         }
         menu.autoenablesItems = false
         menu.delegate = self

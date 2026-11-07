@@ -2,6 +2,9 @@ import AppKit
 import Symbols
 
 @MainActor final class StatusIconView: NSImageView {
+    static let iconSize = NSSize(width: 26, height: 20)
+    static let horizontalInset: CGFloat = 5
+
     private var isOffline: Bool?
     private var breathing = false
 
