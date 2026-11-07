@@ -2,7 +2,7 @@ import AppKit
 import Symbols
 
 @MainActor final class StatusIconView: NSImageView {
-    static let iconSize = NSSize(width: 26, height: 20)
+    static let iconSize = NSSize(width: 22, height: 18)
     static let horizontalInset: CGFloat = 5
 
     private var isOffline: Bool?
@@ -10,7 +10,7 @@ import Symbols
 
     func setEmphasized(_ emphasized: Bool) {
         cell?.backgroundStyle = emphasized ? .emphasized : .normal
-        symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+        symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
             .applying(.init(hierarchicalColor: emphasized ? .selectedMenuItemTextColor : .labelColor))
     }
 
