@@ -5,13 +5,22 @@ import Symbols
     static let iconSize = NSSize(width: 22, height: 18)
     static let horizontalInset: CGFloat = 2
 
+    private static let symbolStyle = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        .applying(.preferringMonochrome())
+    static let connectedImage: NSImage? = {
+        let image = NSImage(systemSymbolName: "personalhotspot", accessibilityDescription: nil)?
+            .withSymbolConfiguration(symbolStyle)
+        image?.isTemplate = true
+        return image
+    }()
+
     private var isOffline: Bool?
     private var pulsing = false
 
     func setEmphasized(_ emphasized: Bool) {
         cell?.backgroundStyle = emphasized ? .emphasized : .normal
-        symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-            .applying(.init(hierarchicalColor: emphasized ? .selectedMenuItemTextColor : .labelColor))
+        symbolConfiguration = Self.symbolStyle
+        contentTintColor = emphasized ? .selectedMenuItemTextColor : .labelColor
     }
 
     // Keep the status button responsible for clicks and menu tracking.
@@ -20,8 +29,9 @@ import Symbols
     func update(isOffline: Bool, reduceMotion: Bool) {
         if self.isOffline != isOffline {
             self.isOffline = isOffline
-            let image = NSImage(systemSymbolName: isOffline ? "personalhotspot.slash" : "personalhotspot",
-                                accessibilityDescription: nil)
+            let image = isOffline
+                ? NSImage(systemSymbolName: "personalhotspot.slash", accessibilityDescription: nil)
+                : nil
             image?.isTemplate = true
             self.image = image
             if symbolConfiguration == nil { setEmphasized(false) }

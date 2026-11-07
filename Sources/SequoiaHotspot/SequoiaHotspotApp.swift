@@ -77,8 +77,12 @@ import ServiceManagement
     @objc private func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
 
     private func render() {
-        statusIcon.update(isOffline: controller.isOffline,
+        let offline = controller.isOffline
+        statusIcon.update(isOffline: offline,
                           reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        // Let the system draw the connected icon using the menu-bar template style.
+        statusIcon.isHidden = !offline
+        statusItem.button?.image = offline ? nil : StatusIconView.connectedImage
         status.title = controller.status
         status.toolTip = controller.status
         statusItem.button?.toolTip = "Sequoia Hotspot\n\(controller.status)"
