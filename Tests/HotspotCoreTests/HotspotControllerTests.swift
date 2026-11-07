@@ -49,6 +49,23 @@ import HotspotCore
         expect(predicate(), file: file, line: line)
     }
 
+    @MainActor func testOfflineIndicatorTracksNetworkWhilePausedAndResetsForSleep() {
+        let controller = HotspotController(discovery: Discovery(), joiner: Joiner())
+        expectFalse(controller.isOffline) // Unknown is not a confirmed disconnection.
+        controller.networkAvailable(false)
+        expect(controller.isOffline) // Pausing auto-connect does not hide a disconnection.
+        controller.setEnabled(true)
+        expect(controller.isOffline)
+        controller.setEnabled(false)
+        expect(controller.isOffline)
+        controller.suspend()
+        expectFalse(controller.isOffline)
+        controller.networkAvailable(false)
+        expect(controller.isOffline)
+        controller.networkAvailable(true)
+        expectFalse(controller.isOffline)
+    }
+
     @MainActor func testOfflineStartupAndRecoveryOnlyBrowseWhenNeeded() async throws {
         let discovery = Discovery(), joiner = Joiner()
         let controller = HotspotController(discovery: discovery, joiner: joiner)
@@ -274,6 +291,7 @@ private func expectEqual<T: Equatable>(_ actual: T, _ expected: T, file: StaticS
 @main struct HotspotCoreChecks {
     @MainActor static func main() async throws {
         let tests = HotspotControllerTests()
+        tests.testOfflineIndicatorTracksNetworkWhilePausedAndResetsForSleep()
         try await tests.testOfflineStartupAndRecoveryOnlyBrowseWhenNeeded()
         try await tests.testRecoveryDiscardsLateActivationCredentials()
         try await tests.testRepeatedUpdatesDoNotRetryButReappearanceDoes()
@@ -286,6 +304,6 @@ private func expectEqual<T: Equatable>(_ actual: T, _ expected: T, file: StaticS
         tests.testUnsupportedInterfaceCanBeRetriedWithoutPretendingToBrowse()
         tests.testWiFiPowerFailureStopsDiscoveryAndRetryEnablesWiFi()
         tests.testOfflineWhilePausedDoesNotEnableWiFiUntilResumed()
-        print("12 hotspot behavior checks passed.")
+        print("13 hotspot behavior checks passed.")
     }
 }

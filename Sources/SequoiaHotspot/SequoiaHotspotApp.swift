@@ -6,6 +6,7 @@ import ServiceManagement
     private let controller = HotspotController(discovery: RemoteHotspotDiscovery(), joiner: WiFiJoiner())
     private let network = NetworkObserver()
     private var statusItem: NSStatusItem!
+    private let statusIcon = StatusIconView()
     private let menu = NSMenu()
     private let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let toggle = NSMenuItem(title: "自动连接热点", action: #selector(toggleEnabled), keyEquivalent: "")
@@ -19,9 +20,16 @@ import ServiceManagement
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.autosaveName = "SequoiaHotspot.StatusItem"
         statusItem.button?.window?.title = "SequoiaHotspot.StatusItem"
-        let image = NSImage(systemSymbolName: "personalhotspot", accessibilityDescription: "Sequoia Hotspot")
-        image?.isTemplate = true
-        statusItem.button?.image = image
+        if let button = statusItem.button {
+            statusIcon.translatesAutoresizingMaskIntoConstraints = false
+            button.addSubview(statusIcon)
+            NSLayoutConstraint.activate([
+                statusIcon.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+                statusIcon.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                statusIcon.widthAnchor.constraint(equalToConstant: 18),
+                statusIcon.heightAnchor.constraint(equalToConstant: 18),
+            ])
+        }
         menu.autoenablesItems = false
         menu.delegate = self
         let title = NSMenuItem(title: "Sequoia Hotspot", action: nil, keyEquivalent: "")
@@ -44,6 +52,7 @@ import ServiceManagement
         let notifications = NSWorkspace.shared.notificationCenter
         notifications.addObserver(self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
         notifications.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
+        notifications.addObserver(self, selector: #selector(accessibilityDisplayChanged), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         renderLogin()
     }
 
@@ -55,6 +64,7 @@ import ServiceManagement
 
     @objc private func willSleep() { network.stop(); controller.suspend() }
     @objc private func didWake() { network.start() }
+    @objc private func accessibilityDisplayChanged() { render() }
     @objc private func toggleEnabled() {
         let enabled = !controller.enabled
         UserDefaults.standard.set(enabled, forKey: "automaticConnection")
@@ -64,6 +74,8 @@ import ServiceManagement
     @objc private func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
 
     private func render() {
+        statusIcon.update(isOffline: controller.isOffline,
+                          reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         status.title = controller.status
         status.toolTip = controller.status
         statusItem.button?.toolTip = "Sequoia Hotspot\n\(controller.status)"
@@ -72,7 +84,12 @@ import ServiceManagement
         retry.isEnabled = controller.canRetry
     }
 
-    func menuWillOpen(_ menu: NSMenu) { renderLogin() }
+    func menuWillOpen(_ menu: NSMenu) {
+        statusIcon.setEmphasized(true)
+        renderLogin()
+    }
+
+    func menuDidClose(_ menu: NSMenu) { statusIcon.setEmphasized(false) }
 
     private func renderLogin() {
         let state = SMAppService.mainApp.status

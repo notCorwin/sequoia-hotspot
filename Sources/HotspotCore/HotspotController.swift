@@ -36,6 +36,7 @@ public struct HotspotFailure: LocalizedError, Sendable {
     public private(set) var browsing = false
     public private(set) var busy = false
     public private(set) var enabled = false
+    public var isOffline: Bool { available == false }
     public var canRetry: Bool { enabled && available == false && !busy }
     public var changed: (() -> Void)?
     private let discovery: any HotspotDiscovery
