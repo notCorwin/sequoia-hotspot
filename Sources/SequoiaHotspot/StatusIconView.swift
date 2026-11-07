@@ -32,7 +32,7 @@ import Symbols
         guard breathing != shouldBreathe else { return }
         breathing = shouldBreathe
         if shouldBreathe {
-            addSymbolEffect(.breathe.pulse.byLayer, options: .repeat(.continuous).speed(2))
+            addSymbolEffect(.breathe.pulse.byLayer, options: .repeat(.continuous).speed(4))
         } else {
             removeAllSymbolEffects(animated: false)
         }
