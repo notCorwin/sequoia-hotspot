@@ -8,7 +8,7 @@ import QuartzCore
     private static let symbolStyle = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         .applying(.preferringMonochrome())
     private static let connectedImage = symbol("personalhotspot")
-    private static let disconnectedImage = symbol("personalhotspot.slash")
+    private static let disconnectedImage = symbol("personalhotspot.slash", isTemplate: false)
     // labelColor includes translucency. Keep its appearance-dependent hue, but
     // draw solid menu-bar glyphs instead of blending them into the background.
     private static let normalTint = NSColor(name: nil) { appearance in
@@ -19,10 +19,11 @@ import QuartzCore
         return color
     }
 
-    private static func symbol(_ name: String) -> NSImage? {
+    private static func symbol(_ name: String, isTemplate: Bool = true) -> NSImage? {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(symbolStyle)
-        image?.isTemplate = true
+            .withSymbolConfiguration(isTemplate ? symbolStyle
+                : NSImage.SymbolConfiguration(pointSize: 14, weight: .medium))
+        image?.isTemplate = isTemplate
         return image
     }
 
@@ -58,7 +59,6 @@ import QuartzCore
 
     func setEmphasized(_ emphasized: Bool) {
         self.emphasized = emphasized
-        cell?.backgroundStyle = emphasized ? .emphasized : .normal
         symbolConfiguration = Self.symbolStyle
         updateTint()
     }
@@ -82,6 +82,7 @@ import QuartzCore
             CATransaction.setDisableActions(true)
             image = isOffline ? Self.disconnectedImage : Self.connectedImage
             offline = isOffline
+            updateTint()
             alignWithButton()
             CATransaction.commit()
         }
@@ -118,12 +119,23 @@ import QuartzCore
     }
 
     private func updateTint() {
+        cell?.backgroundStyle = emphasized && offline != true ? .emphasized : .normal
         let tint = emphasized ? NSColor.selectedMenuItemTextColor : Self.normalTint
-        contentTintColor = replacementLayers.isEmpty ? tint : .clear
+        let rings = NSColor.systemGray
+        if offline == true && replacementLayers.isEmpty {
+            symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+                .applying(.init(paletteColors: [tint, rings]))
+            contentTintColor = nil
+        } else {
+            symbolConfiguration = Self.symbolStyle
+            contentTintColor = replacementLayers.isEmpty ? tint : .clear
+        }
         effectiveAppearance.performAsCurrentDrawingAppearance {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            for part in replacementLayers { part.backgroundColor = tint.cgColor }
+            for (index, part) in replacementLayers.enumerated() {
+                part.backgroundColor = (index == 0 ? rings : tint).cgColor
+            }
             CATransaction.commit()
         }
     }
@@ -157,14 +169,14 @@ import QuartzCore
             opacity.values = [1, 0, 0, 1, 1]
             let easing = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
             for animation in [size, opacity] {
-                animation.duration = 0.8
+                animation.duration = 1.6
                 animation.timingFunctions = Array(repeating: easing, count: times.count - 1)
             }
             let replacement = CAAnimationGroup()
             replacement.animations = [size, opacity]
-            replacement.duration = 0.8
+            replacement.duration = 1.6
             replacement.repeatCount = .infinity
-            replacement.beginTime = start + Double(index) * 0.035
+            replacement.beginTime = start + Double(index) * 0.07
             replacement.fillMode = .backwards
             part.add(replacement, forKey: "offlineReplacement")
         }

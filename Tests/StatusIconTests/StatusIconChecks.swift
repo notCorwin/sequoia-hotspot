@@ -65,13 +65,13 @@ import QuartzCore
         var movingCycles = Set<Int>()
         var coverage: [Int] = []
         let start = CACurrentMediaTime()
-        for _ in 0..<40 {
+        for _ in 0..<76 {
             run(0.05)
             let elapsed = CACurrentMediaTime() - start
             for part in layers {
                 if let frame = part.presentation(), frame.opacity < 0.95,
                    abs(frame.transform.m11 - 1) > 0.01 {
-                    movingCycles.insert(Int(elapsed / 0.8))
+                    movingCycles.insert(Int(elapsed / 1.6))
                 }
             }
             let context = CGContext(data: nil, width: 88, height: 72, bitsPerComponent: 8,
@@ -127,17 +127,28 @@ import QuartzCore
                         icon.layer!.render(in: context)
                         bitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
                     }
-                    var solidPixels = 0
+                    var grayPixels = 0
+                    var primaryPixels = 0
                     for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
                         let color = bitmap.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
                         guard color.alphaComponent > 0.99 else { continue }
-                        solidPixels += 1
-                        expect(abs(color.redComponent - expected.redComponent) < 0.01 &&
-                               abs(color.greenComponent - expected.greenComponent) < 0.01 &&
-                               abs(color.blueComponent - expected.blueComponent) < 0.01,
-                               "Status icon tint does not match its appearance or menu highlight")
+                        func matches(_ target: NSColor) -> Bool {
+                            abs(color.redComponent - target.redComponent) < 0.01 &&
+                            abs(color.greenComponent - target.greenComponent) < 0.01 &&
+                            abs(color.blueComponent - target.blueComponent) < 0.01
+                        }
+                        // AppKit may adapt palette gray for menu vibrancy; both
+                        // native static rendering and animated masks must stay gray.
+                        let gray = offline && color.redComponent > 0.25 && color.redComponent < 0.85 &&
+                            abs(color.redComponent - color.greenComponent) < 0.03 &&
+                            abs(color.redComponent - color.blueComponent) < 0.05
+                        if gray { grayPixels += 1 }
+                        if matches(expected) { primaryPixels += 1 }
+                        expect(matches(expected) || gray,
+                               "Status icon tint mismatch: \(appearance.rawValue), offline=\(offline), reduceMotion=\(reduceMotion), emphasized=\(emphasized), color=\(color), primary=\(expected)")
                     } }
-                    expect(solidPixels > 0, "Status icon is translucent in \(appearance.rawValue)")
+                    if offline { expect(grayPixels > 0, "Offline rings lost their gray hierarchy: \(appearance.rawValue), reduceMotion=\(reduceMotion), emphasized=\(emphasized)") }
+                    expect(primaryPixels > 0, "Status icon lost its primary foreground color")
                 }
             }
         }
