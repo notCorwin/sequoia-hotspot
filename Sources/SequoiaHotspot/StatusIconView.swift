@@ -1,6 +1,5 @@
 import AppKit
 import QuartzCore
-import Symbols
 
 @MainActor final class StatusIconView: NSImageView {
     static let iconWidth: CGFloat = 22
@@ -28,7 +27,9 @@ import Symbols
     }
 
     private var offline: Bool?
-    private var replacementTimer: Timer?
+    private var replacementLayers: [CALayer] = []
+    private var emphasized = false
+    private static var layerMasks: [CGFloat: [CGImage]] = [:]
 
     func install(in button: NSStatusBarButton) {
         button.image = nil
@@ -56,9 +57,10 @@ import Symbols
     }
 
     func setEmphasized(_ emphasized: Bool) {
+        self.emphasized = emphasized
         cell?.backgroundStyle = emphasized ? .emphasized : .normal
         symbolConfiguration = Self.symbolStyle
-        contentTintColor = emphasized ? .selectedMenuItemTextColor : Self.normalTint
+        updateTint()
     }
 
     // Both symbols share a canvas center, regardless of their optical padding.
@@ -88,29 +90,128 @@ import Symbols
             stopReplacement()
             return
         }
-        guard replacementTimer == nil else { return }
-
-        // Content transitions play once; their repeat option does not keep them
-        // running like an indefinite symbol effect. Replay each native transition.
-        replaceOfflineSymbol()
-        let timer = Timer(timeInterval: 0.8, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            MainActor.assumeIsolated { self.replaceOfflineSymbol() }
-        }
-        replacementTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        guard replacementLayers.isEmpty else { return }
+        startReplacement()
     }
 
-    private func replaceOfflineSymbol() {
-        guard let image = Self.disconnectedImage else { return }
-        setSymbolImage(image, contentTransition: .replace.upUp.byLayer,
-                       options: .speed(4))
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateTint()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        guard !replacementLayers.isEmpty else { return }
+        stopReplacement()
+        startReplacement()
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for part in replacementLayers {
+            part.frame = cell?.imageRect(forBounds: bounds) ?? bounds
+            part.mask?.frame = part.bounds
+        }
+        CATransaction.commit()
+    }
+
+    private func updateTint() {
+        let tint = emphasized ? NSColor.selectedMenuItemTextColor : Self.normalTint
+        contentTintColor = replacementLayers.isEmpty ? tint : .clear
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            for part in replacementLayers { part.backgroundColor = tint.cgColor }
+            CATransaction.commit()
+        }
+    }
+
+    private func startReplacement() {
+        wantsLayer = true
+        let scale = window?.backingScaleFactor ?? 2
+        let masks = Self.masks(scale: scale)
+        let start = CACurrentMediaTime()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, image) in masks.enumerated() {
+            let part = CALayer()
+            part.frame = cell?.imageRect(forBounds: bounds) ?? bounds
+            let mask = CALayer()
+            mask.frame = part.bounds
+            mask.contents = image
+            mask.contentsScale = scale
+            part.mask = mask
+            layer!.addSublayer(part)
+            replacementLayers.append(part)
+
+            // Up-Up: grow the outgoing layer, then grow its replacement from small.
+            // Keep the complete glyph between cycles and stagger its semantic layers.
+            let times: [NSNumber] = [0, 0.175, 0.176, 0.35, 1]
+            let size = CAKeyframeAnimation(keyPath: "transform.scale")
+            size.keyTimes = times
+            size.values = [1, 1.5, 0.5, 1, 1]
+            let opacity = CAKeyframeAnimation(keyPath: "opacity")
+            opacity.keyTimes = times
+            opacity.values = [1, 0, 0, 1, 1]
+            let easing = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+            for animation in [size, opacity] {
+                animation.duration = 0.8
+                animation.timingFunctions = Array(repeating: easing, count: times.count - 1)
+            }
+            let replacement = CAAnimationGroup()
+            replacement.animations = [size, opacity]
+            replacement.duration = 0.8
+            replacement.repeatCount = .infinity
+            replacement.beginTime = start + Double(index) * 0.035
+            replacement.fillMode = .backwards
+            part.add(replacement, forKey: "offlineReplacement")
+        }
+        updateTint()
+        CATransaction.commit()
     }
 
     private func stopReplacement() {
-        guard let timer = replacementTimer else { return }
-        timer.invalidate()
-        replacementTimer = nil
-        removeAllSymbolEffects(animated: false)
+        guard !replacementLayers.isEmpty else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for part in replacementLayers { part.removeFromSuperlayer() }
+        replacementLayers.removeAll()
+        updateTint()
+        CATransaction.commit()
+    }
+
+    // SF Symbols' palette supplies the native slash and chain masks. Cache only
+    // scale-dependent geometry; appearance and menu highlighting change tint alone.
+    private static func masks(scale: CGFloat) -> [CGImage] {
+        if let cached = layerMasks[scale] { return cached }
+        let palette = NSImage(systemSymbolName: "personalhotspot.slash", accessibilityDescription: nil)!
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+                .applying(.init(paletteColors: [.red, .green])))!
+        let width = Int(ceil(palette.size.width * scale))
+        let height = Int(ceil(palette.size.height * scale))
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                     bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                     isPlanar: false, colorSpaceName: .deviceRGB,
+                                     bytesPerRow: width * 4, bitsPerPixel: 32)!
+        bitmap.size = palette.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        palette.draw(in: NSRect(origin: .zero, size: palette.size))
+        NSGraphicsContext.restoreGraphicsState()
+        let result = [1, 0].map { channel -> CGImage in
+            let mask = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                       bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                       isPlanar: false, colorSpaceName: .deviceRGB,
+                                       bytesPerRow: width * 4, bitsPerPixel: 32)!
+            for pixel in 0..<(width * height) {
+                let alpha = bitmap.bitmapData![pixel * 4 + channel]
+                for component in 0..<4 { mask.bitmapData![pixel * 4 + component] = alpha }
+            }
+            return mask.cgImage!
+        }
+        layerMasks[scale] = result
+        return result
     }
 }

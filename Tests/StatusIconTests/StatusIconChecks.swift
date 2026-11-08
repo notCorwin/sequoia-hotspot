@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 // Offscreen rendering only: never orders a window or changes the live network.
 @main struct StatusIconChecks {
@@ -43,47 +44,70 @@ import AppKit
             icon.removeFromSuperview()
             button.removeFromSuperview()
         }
-        print("Status icons stay aligned and render opaque in light and dark appearances.")
-    }
-
-    @MainActor private final class ImageChanges {
-        var count = 0
+        print("Status icons stay aligned and opaque; layered rendered frames move across three animation cycles.")
     }
 
     @MainActor private static func checkRepetition(_ icon: StatusIconView) {
-        icon.update(isOffline: false, reduceMotion: true)
-        let changes = ImageChanges()
-        let observation = icon.observe(\.image) { _, _ in
-            MainActor.assumeIsolated { changes.count += 1 }
+        func parts() -> [CALayer] {
+            (icon.layer?.sublayers ?? []).filter { !($0.animationKeys() ?? []).isEmpty }
         }
-        defer { observation.invalidate() }
-
+        func run(_ seconds: TimeInterval) {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: seconds))
+        }
         icon.update(isOffline: true, reduceMotion: false)
-        let initial = changes.count
+        CATransaction.flush()
+        let layers = parts()
+        expect(layers.count > 1, "Offline icon does not animate separate layers")
         for _ in 0..<5 { icon.update(isOffline: true, reduceMotion: false) }
-        expect(changes.count == initial, "Status updates restarted an active replacement")
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 1.75))
-        expect(changes.count >= initial + 2, "Offline replacement stopped after its first cycle")
+        expect(parts() == layers, "Status updates recreated active animation layers")
+
+        var frames = Set<Data>()
+        var movingCycles = Set<Int>()
+        var coverage: [Int] = []
+        let start = CACurrentMediaTime()
+        for _ in 0..<40 {
+            run(0.05)
+            let elapsed = CACurrentMediaTime() - start
+            for part in layers {
+                if let frame = part.presentation(), frame.opacity < 0.95,
+                   abs(frame.transform.m11 - 1) > 0.01 {
+                    movingCycles.insert(Int(elapsed / 0.8))
+                }
+            }
+            let context = CGContext(data: nil, width: 88, height: 72, bitsPerComponent: 8,
+                                    bytesPerRow: 88 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.scaleBy(x: 4, y: 4)
+            icon.layer!.presentation()!.render(in: context)
+            let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
+            coverage.append((0..<(88 * 72)).reduce(0) { $0 + Int(pixels[$1 * 4 + 3]) })
+            frames.insert(Data(bytes: context.data!, count: 88 * 72 * 4))
+        }
+        expect(movingCycles.isSuperset(of: [0, 1, 2]), "Offline layers stopped moving after their first cycle")
+        expect(frames.count > 5, "Offline animation did not produce changing rendered frames")
+        expect(coverage.min()! < coverage.max()! / 4,
+               "A stationary glyph remains beneath the replacement animation")
 
         icon.update(isOffline: true, reduceMotion: true)
-        let reduced = changes.count
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.9))
-        expect(changes.count == reduced, "Reduced Motion left offline replacement running")
+        run(0.1)
+        expect(parts().isEmpty, "Reduced Motion left offline animation running")
+        let settled = snapshot(icon)
+        run(0.15)
+        expect(snapshot(icon) == settled, "Reduced Motion did not leave a stable icon")
 
         icon.update(isOffline: true, reduceMotion: false)
-        expect(changes.count > reduced, "Offline replacement did not resume")
+        expect(parts().count > 1, "Offline animation did not resume")
         icon.update(isOffline: false, reduceMotion: false)
-        let online = changes.count
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.9))
-        expect(changes.count == online, "Offline replacement continued after reconnecting")
+        run(0.1)
+        expect(parts().isEmpty, "Offline animation continued after reconnecting")
     }
 
     @MainActor private static func checkTint(_ icon: StatusIconView) {
         // Reuse the same view to catch colors frozen to the initial appearance.
         for appearance in [NSAppearance.Name.aqua, .darkAqua, .aqua] {
             icon.window!.appearance = NSAppearance(named: appearance)
-            for offline in [false, true] {
-                icon.update(isOffline: offline, reduceMotion: true)
+            for (offline, reduceMotion) in [(false, true), (true, true), (true, false)] {
+                icon.update(isOffline: offline, reduceMotion: reduceMotion)
                 for emphasized in [false, true, false] {
                     icon.setEmphasized(emphasized)
                     var expected = NSColor.black
@@ -91,8 +115,18 @@ import AppKit
                         expected = (emphasized ? NSColor.selectedMenuItemTextColor
                                     : NSColor.labelColor.withAlphaComponent(1)).usingColorSpace(.sRGB)!
                     }
-                    let bitmap = icon.bitmapImageRepForCachingDisplay(in: icon.bounds)!
-                    icon.cacheDisplay(in: icon.bounds, to: bitmap)
+                    let bitmap: NSBitmapImageRep
+                    if reduceMotion {
+                        bitmap = icon.bitmapImageRepForCachingDisplay(in: icon.bounds)!
+                        icon.cacheDisplay(in: icon.bounds, to: bitmap)
+                    } else {
+                        let context = CGContext(data: nil, width: 44, height: 36, bitsPerComponent: 8,
+                                                bytesPerRow: 44 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                        context.scaleBy(x: 2, y: 2)
+                        icon.layer!.render(in: context)
+                        bitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
+                    }
                     var solidPixels = 0
                     for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
                         let color = bitmap.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
