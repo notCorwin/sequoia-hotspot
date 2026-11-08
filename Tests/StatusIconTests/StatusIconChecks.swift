@@ -22,15 +22,18 @@ import AppKit
                 icon.update(isOffline: offline, reduceMotion: false)
                 expect(button.image == nil, "A second renderer replaced the status icon")
                 expect(icon.frame.midY == button.bounds.midY, "The image canvas moved vertically")
-                let mask = snapshot(button)
+                // Compare settled glyphs: replacement intentionally moves layers off-canvas.
                 if offline {
-                    checkAlignment(online!, mask)
                     let frame = icon.frame
                     icon.update(isOffline: true, reduceMotion: true)
                     expect(icon.frame == frame, "Reduced Motion moved the icon")
+                }
+                let mask = snapshot(button)
+                if offline {
+                    checkAlignment(online!, mask)
                     icon.update(isOffline: true, reduceMotion: false)
                 } else if let online {
-                    expect(mask == online, "Returning from an active pulse changed the online icon")
+                    expect(mask == online, "Returning from an active replacement changed the online icon")
                 } else {
                     online = mask
                 }

@@ -28,7 +28,7 @@ import Symbols
     }
 
     private var offline: Bool?
-    private var pulsing = false
+    private var replacing = false
 
     func install(in button: NSStatusBarButton) {
         button.image = nil
@@ -80,17 +80,18 @@ import Symbols
 
         if offline != isOffline {
             removeAllSymbolEffects(animated: false)
-            pulsing = false
+            replacing = false
             image = isOffline ? Self.disconnectedImage : Self.connectedImage
             offline = isOffline
             alignWithButton()
         }
 
-        let shouldPulse = isOffline && !reduceMotion
-        guard pulsing != shouldPulse else { return }
-        pulsing = shouldPulse
-        if shouldPulse {
-            addSymbolEffect(.pulse.byLayer, options: .repeat(.continuous).speed(4))
+        let shouldReplace = isOffline && !reduceMotion
+        guard replacing != shouldReplace else { return }
+        replacing = shouldReplace
+        if shouldReplace, let image = Self.disconnectedImage {
+            setSymbolImage(image, contentTransition: .replace.upUp.byLayer,
+                           options: .repeat(.continuous).speed(4))
         } else {
             removeAllSymbolEffects(animated: false)
         }
