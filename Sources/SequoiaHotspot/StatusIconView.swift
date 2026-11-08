@@ -159,22 +159,22 @@ import QuartzCore
             replacementLayers.append(part)
 
             // Up-Up: grow the outgoing layer, then grow its replacement from small.
-            // Keep the complete glyph between cycles and stagger its semantic layers.
-            let times: [NSNumber] = [0, 0.175, 0.176, 0.35, 1]
+            // Preserve the half-speed motion, with no hold between replacements.
+            let times: [NSNumber] = [0, 0.5, 0.503, 1]
             let size = CAKeyframeAnimation(keyPath: "transform.scale")
             size.keyTimes = times
-            size.values = [1, 1.5, 0.5, 1, 1]
+            size.values = [1, 1.5, 0.5, 1]
             let opacity = CAKeyframeAnimation(keyPath: "opacity")
             opacity.keyTimes = times
-            opacity.values = [1, 0, 0, 1, 1]
+            opacity.values = [1, 0, 0, 1]
             let easing = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
             for animation in [size, opacity] {
-                animation.duration = 1.6
+                animation.duration = 0.56
                 animation.timingFunctions = Array(repeating: easing, count: times.count - 1)
             }
             let replacement = CAAnimationGroup()
             replacement.animations = [size, opacity]
-            replacement.duration = 1.6
+            replacement.duration = 0.56
             replacement.repeatCount = .infinity
             replacement.beginTime = start + Double(index) * 0.07
             replacement.fillMode = .backwards

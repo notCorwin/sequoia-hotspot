@@ -64,14 +64,18 @@ import QuartzCore
         var frames = Set<Data>()
         var movingCycles = Set<Int>()
         var coverage: [Int] = []
+        var previous: Data?
+        var stillFrames = 0
+        var longestStill = 0
+        let period = layers[0].animation(forKey: layers[0].animationKeys()![0])!.duration
         let start = CACurrentMediaTime()
-        for _ in 0..<76 {
+        for _ in 0..<Int(ceil(period * 3 / 0.05)) {
             run(0.05)
             let elapsed = CACurrentMediaTime() - start
             for part in layers {
                 if let frame = part.presentation(), frame.opacity < 0.95,
                    abs(frame.transform.m11 - 1) > 0.01 {
-                    movingCycles.insert(Int(elapsed / 1.6))
+                    movingCycles.insert(Int(elapsed / period))
                 }
             }
             let context = CGContext(data: nil, width: 88, height: 72, bitsPerComponent: 8,
@@ -81,9 +85,14 @@ import QuartzCore
             icon.layer!.presentation()!.render(in: context)
             let pixels = context.data!.assumingMemoryBound(to: UInt8.self)
             coverage.append((0..<(88 * 72)).reduce(0) { $0 + Int(pixels[$1 * 4 + 3]) })
-            frames.insert(Data(bytes: context.data!, count: 88 * 72 * 4))
+            let rendered = Data(bytes: context.data!, count: 88 * 72 * 4)
+            stillFrames = rendered == previous ? stillFrames + 1 : 0
+            longestStill = max(longestStill, stillFrames)
+            previous = rendered
+            frames.insert(rendered)
         }
         expect(movingCycles.isSuperset(of: [0, 1, 2]), "Offline layers stopped moving after their first cycle")
+        expect(longestStill < 4, "Offline replacement pauses between animation cycles")
         expect(frames.count > 5, "Offline animation did not produce changing rendered frames")
         expect(coverage.min()! < coverage.max()! / 4,
                "A stationary glyph remains beneath the replacement animation")
