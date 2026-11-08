@@ -38,11 +38,44 @@ import AppKit
                     online = mask
                 }
             }
+            if height == 22 { checkRepetition(icon) }
             checkTint(icon)
             icon.removeFromSuperview()
             button.removeFromSuperview()
         }
         print("Status icons stay aligned and render opaque in light and dark appearances.")
+    }
+
+    @MainActor private final class ImageChanges {
+        var count = 0
+    }
+
+    @MainActor private static func checkRepetition(_ icon: StatusIconView) {
+        icon.update(isOffline: false, reduceMotion: true)
+        let changes = ImageChanges()
+        let observation = icon.observe(\.image) { _, _ in
+            MainActor.assumeIsolated { changes.count += 1 }
+        }
+        defer { observation.invalidate() }
+
+        icon.update(isOffline: true, reduceMotion: false)
+        let initial = changes.count
+        for _ in 0..<5 { icon.update(isOffline: true, reduceMotion: false) }
+        expect(changes.count == initial, "Status updates restarted an active replacement")
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 1.75))
+        expect(changes.count >= initial + 2, "Offline replacement stopped after its first cycle")
+
+        icon.update(isOffline: true, reduceMotion: true)
+        let reduced = changes.count
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.9))
+        expect(changes.count == reduced, "Reduced Motion left offline replacement running")
+
+        icon.update(isOffline: true, reduceMotion: false)
+        expect(changes.count > reduced, "Offline replacement did not resume")
+        icon.update(isOffline: false, reduceMotion: false)
+        let online = changes.count
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.9))
+        expect(changes.count == online, "Offline replacement continued after reconnecting")
     }
 
     @MainActor private static func checkTint(_ icon: StatusIconView) {

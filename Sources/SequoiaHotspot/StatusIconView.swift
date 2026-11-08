@@ -28,7 +28,7 @@ import Symbols
     }
 
     private var offline: Bool?
-    private var replacing = false
+    private var replacementTimer: Timer?
 
     func install(in button: NSStatusBarButton) {
         button.image = nil
@@ -74,26 +74,43 @@ import Symbols
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func update(isOffline: Bool, reduceMotion: Bool) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
-
         if offline != isOffline {
-            removeAllSymbolEffects(animated: false)
-            replacing = false
+            stopReplacement()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             image = isOffline ? Self.disconnectedImage : Self.connectedImage
             offline = isOffline
             alignWithButton()
+            CATransaction.commit()
         }
 
-        let shouldReplace = isOffline && !reduceMotion
-        guard replacing != shouldReplace else { return }
-        replacing = shouldReplace
-        if shouldReplace, let image = Self.disconnectedImage {
-            setSymbolImage(image, contentTransition: .replace.upUp.byLayer,
-                           options: .repeat(.continuous).speed(4))
-        } else {
-            removeAllSymbolEffects(animated: false)
+        guard isOffline && !reduceMotion else {
+            stopReplacement()
+            return
         }
+        guard replacementTimer == nil else { return }
+
+        // Content transitions play once; their repeat option does not keep them
+        // running like an indefinite symbol effect. Replay each native transition.
+        replaceOfflineSymbol()
+        let timer = Timer(timeInterval: 0.8, repeats: true) { [weak self] timer in
+            guard let self else { timer.invalidate(); return }
+            MainActor.assumeIsolated { self.replaceOfflineSymbol() }
+        }
+        replacementTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func replaceOfflineSymbol() {
+        guard let image = Self.disconnectedImage else { return }
+        setSymbolImage(image, contentTransition: .replace.upUp.byLayer,
+                       options: .speed(4))
+    }
+
+    private func stopReplacement() {
+        guard let timer = replacementTimer else { return }
+        timer.invalidate()
+        replacementTimer = nil
+        removeAllSymbolEffects(animated: false)
     }
 }
